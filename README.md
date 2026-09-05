@@ -1,4 +1,4 @@
-# astrbot_plugin_mclink（McLink 联动管家）
+# astrbot_plugin_mc_butler（MC 服务器大管家）
 
 AstrBot 的 MC 服务器联动插件：QQ ↔ MC 账号绑定 + 管理员远程执行 MCDR 指令 + 子服状态查询，并支持 @机器人/私聊用自然语言直接使用上述功能（LLM 工具调用）。
 
@@ -31,7 +31,7 @@ Velocity 代理插件 mclink-velocity
 
 ## 配置
 
-在 AstrBot WebUI → 插件管理 → McLink 联动管家 → 配置中填写：
+在 AstrBot WebUI → 插件管理 → MC 服务器大管家 → 配置中填写：
 
 | 配置项 | 说明 |
 |---|---|
