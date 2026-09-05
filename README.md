@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="LOGO.png" width="180" alt="MC 服务器大管家">
+  <img src="logo.png" width="180" alt="MC 服务器大管家">
 </p>
 
 # astrbot_plugin_mc_butler（MC 服务器大管家）
