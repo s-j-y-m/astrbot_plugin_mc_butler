@@ -1,7 +1,7 @@
-name: astrbot_plugin_mc_manager
-display_name: MC 绑定与远程指令
-desc: QQ 绑定 MC 账号 + 远程执行 MCDR 指令（经 Velocity 桥接）+ 自然语言 LLM 工具入口。
-version: v2.5.4
+name: astrbot_plugin_mclink
+display_name: MC 远程管理一键通
+desc: QQ 绑定 MC 账号 + 远程执行 MCDR 指令（经 Velocity 桥接）+ 子服状态查询 + 自然语言 LLM 工具入口。
+version: v2.5.5
 author: Sjym
-repo: https://github.com/s-j-y-m/astrbot_plugin_mc_manager
+repo: https://github.com/s-j-y-m/astrbot_plugin_mclink
 astrbot_version: ">=4.10.4,<5"
