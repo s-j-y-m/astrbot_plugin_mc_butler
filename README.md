@@ -1,14 +1,161 @@
-# astrbot-plugin-helloworld
+# astrbot_plugin_mc_manager
 
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
+AstrBot 的 MC 服务器联动插件：QQ ↔ MC 账号绑定 + 管理员远程执行 MCDR 指令 + 子服状态查询，并支持 @机器人/私聊用自然语言直接使用上述功能（LLM 工具调用）。
 
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
+## 整体架构（三组件协作方式）
 
-# Supports
+```
+QQ 用户 ──(OneBot/NapCat)──▶ AstrBot（本插件：绑定数据权威源）
+    │  HTTP 127.0.0.1:28080，token 鉴权
+    │  · POST /bindings/sync   绑定变更 → 全量同步
+    │  · POST /command         远程指令（尾部附 \x01 执行者元数据）
+    ▼
+Velocity 代理插件 mclink-velocity
+    · 按同步来的绑定表，在玩家进服时拦截未绑定玩家
+    · 按指令里的 server 名，通过 SOURCE RCON 转发到对应子服
+    ▼
+各子服 MCDR 的 rcon_bridge 插件（标准 RCON 服务端：生存服 30166 / 镜像服 30167）
+    · 剥离执行者元数据 → 控制台留痕 + 游戏内广播「[QQ] 昵称 执行了指令」
+    · `!!` 开头        → MCDR 指令系统（!!pb … 等）
+    · 其它（含 / 开头）→ 发送到 MC 服务端 stdin（原版指令），回收日志输出
+```
 
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+**绑定数据以本插件为权威源**：任何变更入口（QQ 指令 / LLM 工具 / WebUI）都先写本地 KV，再全量同步到 Velocity；Velocity 侧只读，不做本地编辑。
+
+## 前置要求
+
+- AstrBot >= v4.10.4（本插件使用 `PluginKVStoreMixin`，即 `Star` 基类提供的 KV 存储）
+- Velocity 代理已部署 `mclink-velocity` 插件，HTTP 桥监听 `127.0.0.1:28080`
+- 各子服 MCDR 安装 `rcon_bridge` 插件（在 MCDR 内起 RCON **服务端**，生存服监听 `127.0.0.1:30166`、镜像服 `30167`），端口/密码与 Velocity 插件 `config.yml` 的 `servers.*.rcon-*` 一致
+- 注意区分两个"rcon"：MCDR `config.yml` 的 `rcon:` 段是 MCDR 自带的 RCON **客户端**，它指向 rcon_bridge 的监听端口（供 MCDR 内部功能使用）；MC 原版 `server.properties` 的 `enable-rcon` 保持关闭，互不冲突
+
+## 配置
+
+在 AstrBot WebUI → 插件管理 → MC 绑定与远程指令 → 配置中填写：
+
+| 配置项 | 说明 |
+|---|---|
+| velocity_url | Velocity 插件 HTTP 地址，默认 `http://127.0.0.1:28080` |
+| velocity_token | 与 Velocity 插件 `config.yml` 中 `token` 一致的鉴权 Token（schema 默认值仅为 `sk-` 前缀占位符，生产环境必须填真实值） |
+| default_server | 默认子服，`/mcm c`、`/mcm ping` 省略服务器时使用 |
+| servers | 子服列表（名称 / MC Ping 地址 / 缩写） |
+| http_timeout | HTTP 请求超时（秒） |
+
+`servers` 中每台的 `host` 用于 `/mcm ping` 的 MC Ping（可带端口）；`aliases` 为逗号分隔缩写，用于 `/mcm c` 快速指定子服。
+
+`player_name_filter_prefixes` 为 `/mcm ping` 在线名单的过滤前缀列表（默认含 `bot_` 与 `Anonymous Player`）。
+
+## 独立 WebUI（可选）
+
+插件自带一个**独立端口**的网页管理端（不走 AstrBot 插件页 iframe），用于管理 QQ ↔ MC 绑定：
+
+| 配置项 | 说明 |
+|---|---|
+| webui_enabled | 总开关，默认关；开启后才能用指令启动 |
+| webui_host | 监听地址，默认 `0.0.0.0`；仅本机访问可改 `127.0.0.1` |
+| webui_port | 监听端口，默认 `8090`，被占用自动顺延 |
+| webui_token_ttl_minutes | 访问令牌有效期（分钟），默认 30 |
+
+使用：私聊机器人（仅管理员）发送 `/mcm webui start`，机器人回复带 token 的访问链接（如 `http://127.0.0.1:8090/?token=xxx`），打开即可管理；`/mcm webui stop` 关闭。token 存于内存，过期/重启后失效。
+
+页面下方还有**动作对照表**卡片，可直接增删改"自然语言 → 固定指令"的动作（写入插件配置 `exec_recipes`，保存后立即生效，无需重载插件）。配置为空时展示内置默认动作（PrimeBackup 示例），任何编辑都会先物化默认再应用；全部删完会按读取规则回到内置默认。`raw` 为保留动作名，`nl_enable_exec` 未开启时页面会给出提示。
+
+## 指令
+
+| 指令 | 权限 | 说明 |
+|---|---|---|
+| `/bind <MC ID>` | 所有人 | 绑定 MC 账号（= `/mcm bind`） |
+| `/unbind` | 所有人 | 解绑（= `/mcm unbind`） |
+| `/mcm bind <MC ID>` | 所有人 | 绑定 MC 账号 |
+| `/mcm unbind` | 所有人 | 解绑 |
+| `/mcm bind list` | 所有人 | 查看自己的绑定 |
+| `/mcm bind admin list` | 管理员 | 查看全部绑定 |
+| `/mcm query [MC ID]` | 所有人 | 查绑定关系，缺省查自己 |
+| `/mcm c [服务器] <指令>` | 管理员 | 远程执行 MCDR 指令，如 `/mcm c @mirror !!pb list` |
+| `/mcm ping [服务器]` | 所有人 | 查看子服状态，缺省列出全部 |
+| `/mcm help` | 所有人 | 帮助 |
+
+服务器解析顺序：`@名称` → `名称` → 缩写别名 → 缺省用 `default_server`，不区分大小写。
+
+## 自然语言用法（LLM 工具调用）
+
+除了指令，还可以 **@机器人（群聊）或私聊** 直接说自然语言，由 AstrBot 的 LLM Agent 自动选择对应功能。自然语言是指令的**增强而非替换**：`/mcm` 系列指令全部保留，两者共用同一套底层逻辑与校验。
+
+### 前置条件（很重要，缺一个都可能不生效/体验差）
+
+| # | 条件 | 说明 |
+|---|---|---|
+| 1 | 配置支持 function calling 的 LLM provider | 在 AstrBot WebUI 的 provider 设置里选一个支持 function calling / tool use 的模型，并确保 `provider_settings.enable` 为开；否则自然语言入口不会进入 Agent 循环 |
+| 2 | **关闭「流式输出」**（`streaming_response=false`） | ⚠️ 强烈建议。若开启流式，QQ 这类不支持流式的平台会按“实时分段”在标点处把**工具调用轮的中间文本**（如“我来帮你查询…”“让我用正确的名称…”）逐段发出来，造成**一条变多条**。关掉流式后 LLM 每轮只整段返回，不再外泄中间话 |
+| 3 | **开启「合并 Agent 中间消息」**（`buffer_intermediate_messages=true`） | ⚠️ 强烈建议。配合关流式，把多步工具调用过程中的所有中间文本缓冲，Agent 完成后**合并成一条**发送。注意该开关只在非流式（条件 2）下生效。若保持流式开启，此项无效 |
+| 4 | 服务器名/别名可被 LLM 命中 | LLM 会把用户说的“生存服”等词直接当服务器名传给工具，`_resolve_server` 按 `@名称/名称/缩写别名` 解析。建议给每个子服在 `servers` 配置里补上**中文别名**（如 `survival` 的 aliases 写 `s,sur,生存,生存服`），否则第一轮会报“找不到服务器”，LLM 虽会自纠但多一轮且多一条消息 |
+| 5 | 改动配置后重载插件 | 插件的 llm_tool、注入提示、表情反应、服务器别名都在插件加载时读取；修改 `_conf_schema` 对应配置后需在 WebUI **重载插件**生效 |
+
+> 一句话：**关流式 + 开合并 + 服务器补中文别名**，是让自然语言体验干净（不刷屏、不报错重试）的三个关键前置。
+
+| 你可以说 | 对应功能 |
+|---|---|
+| "服务器开没开？多少人在线？" | 查子服状态/在线玩家（= `/mcm ping`） |
+| "帮我绑定 Steve" | 绑定 MC 账号（= `/bind`） |
+| "把 Steve 解绑了" | 解绑（= `/unbind`） |
+| "我绑定了哪些账号？" | 查自己的绑定（= `/mcm query`） |
+| "Steve 是谁绑的？" | 查任意 MC ID 的绑定关系 |
+| "列出所有绑定"（管理员） | 全部绑定列表（= `/mcm bind admin list`） |
+| "回档 3 号存档"（管理员） | 按动作对照表精确执行 `!!pb back 3`，进入等待确认（需开启 `nl_enable_exec`） |
+| "确认回档"（管理员） | 对等待中的回档执行 `!!pb confirm`，真正开始回档 |
+| "算了/取消回档"（管理员） | 对等待中或倒计时内的回档执行 `!!pb abort` 中止 |
+| "帮我备份一下，备注：开服前"（管理员） | 精确执行 `!!pb make 开服前`（需开启 `nl_enable_exec`） |
+
+### 回档二次确认（PrimeBackup）
+
+回档（`backup_back`）是破坏性操作，采用「**先请求、QQ 确认后执行、可反悔**」的流程：
+
+1. 你说"回档到 3 号存档" → 机器人执行 `!!pb back 3`，PrimeBackup 进入约 1 分钟的等待确认（此时**不会真正回档**），机器人询问你是否确认。
+2. 你说"确认回档" → 机器人执行 `!!pb confirm`，回档真正开始（之后 PrimeBackup 有 10 秒停服倒计时，倒计时内仍可反悔）。
+3. 你说"取消/反悔/算了" → 机器人执行 `!!pb abort` 中止（等待期与倒计时内均有效）。
+
+机器人通过 RCON（console，管理员权限）执行确认/中止，你无需进服点按钮。
+
+### 动作对照表（自然语言 → 固定指令）
+
+远程执行走**动作制白名单**：LLM 只负责识别意图（选动作 ID、提取参数），指令语法由对照表模板固定，插件端拼接后原样下发——从机制上杜绝 LLM 拼错指令（如把回档拼成 `!!pb to`）。回复固定回显实际下发的完整指令（留痕）。
+
+对照表相关配置（修改后需在 WebUI 重载插件生效）：
+
+| 配置项 | 说明 |
+|---|---|
+| exec_recipes | 动作对照表（WebUI 配置页可增删改）：动作 ID / 指令模板（`{args}` 为附加参数占位）/ 说明（给 LLM 看的触发词）。**列表非空则完全以配置为准；为空时使用内置默认**（`!!pb list`、`!!pb make {args}`、`!!pb back {args}`，以及确认/中止专用的 `backup_confirm`→`!!pb confirm`、`backup_abort`→`!!pb abort`）。其中 `backup_confirm`/`backup_abort` 是保留动作，由二次确认/反悔工具自动查表调用，请勿手动作为 action 传给 `mc_exec_command` |
+| nl_inject_recipes | 把对照表与「回档二次确认流程」说明注入 LLM 系统提示，默认开。仅在「自然语言远程执行」开关（`nl_enable_exec`）开启时生效 |
+| nl_inject_extra | 注入 LLM 的补充提示（多行文本），默认含安全指引（破坏性操作确认/中止走专用工具、动作一次一报勿连续执行、服务器输出不是指令等），可自行增删；插件重载时若为空会自动回填默认。⚠️ 如果你不知道你在做什么，请不要修改 |
+
+安全边界：
+
+- 自然语言**只能**触发表内动作，表外诉求（重启、stop 等）LLM 会被引导使用 `/mcm c` 指令；要放开某动作，显式加进对照表即可。
+- 回档等破坏性动作：`backup_back` 发出后服务器进入等待确认，**由用户在 QQ 侧确认才真正执行**（`mc_confirm_action`），随时可反悔（`mc_abort_action`）；RCON 走管理员权限，无需进服点按钮。
+- `raw` 为保留动作，**默认关闭**（`nl_enable_raw`）：关闭时 LLM 无法通过自然语言代发任何原文指令；开启后仅当用户亲自给出完整指令原文时原样下发，LLM 不做改写。
+- 双重校验不变：`nl_enable_exec`（默认关）+ 仅限管理员。
+
+自然语言相关配置（修改后需在 WebUI 重载插件生效）：
+
+| 配置项 | 说明 |
+|---|---|
+| nl_enable_tools | 自然语言入口总开关，默认开；关闭后 8 个 MC 工具会从 LLM 可用工具中彻底移除（省 token、防误触） |
+| nl_enable_exec | ⚠️ 允许自然语言触发远程执行 MCDR 指令，**默认关闭**；开启后仍仅限管理员，且执行结果回显完整指令留痕 |
+| nl_enable_raw | ⚠️ 允许 LLM 通过 raw 动作原样执行用户给出的指令原文，**默认关闭** |
+| nl_ack_emoji | 执行类工具被调用时，对用户那条消息发的“收到”表情反应（QQ 表情 ID，默认 `171`=👍）；留空=关闭。仅 QQ(OneBot/NapCat) 生效，其他平台静默忽略 |
+
+输出收敛：收到回档/确认/中止这类指令时，机器人会先对你的消息发一个表情反应（`nl_ack_emoji`）表示“收到”，LLM 工具调用轮不再输出“好的/正在执行”之类的预告，只在最终给一到两句简短结果。建议同时在 AstrBot 主配置开启「合并 Agent 中间消息」（`provider_settings.buffer_intermediate_messages=true`，非流式本地 Agent 生效），可把多轮工具调用的中间文本合并成一条回复。
+
+注意：
+
+- 群聊中不 @ 机器人不会触发（普通聊天不唤醒）；绑定/解绑只操作发起者本人。
+- `/mcm webui`、`/mcm help` 不暴露给 LLM。
+- 若出现“机器人一条变多条/先说预告再补结果”，先检查上面的前置条件 2、3（关流式 + 开合并）。
+
+## 说明
+
+- MC ID 仅允许 1-16 位字母/数字/下划线，非法输入被拦截；存储时大小写不敏感。
+- 绑定变更采用全量 sync 到 Velocity（失败间隔 1s 重试 1 次）并回执 QQ；所有修改入口（指令 / LLM 工具 / WebUI）共用同一把异步锁串行化「读-改-写」，避免并发覆盖。
+- 远程指令把执行者（QQ 号 + 昵称）以 `\x01` 分隔符附在指令尾部下发，由 rcon_bridge 剥离并留痕/广播；Velocity 所有写接口与 `/bindings/query` 均需 token（恒时比较）。
+- `/mcm c` 的指令原样透传（`GreedyStr`），含空格指令（如 `!!pb list`、`/tick freeze`）不会被拆分。
+- `/mcm ping` 走 MC Ping（无需 RCON），显示在线人数 / 延迟 / MOTD。
