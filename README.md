@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" width="180" alt="MC 服务器大管家">
+  <img src="https://raw.githubusercontent.com/s-j-y-m/astrbot_plugin_mc_butler/master/logo.png" width="180" alt="MC 服务器大管家">
 </p>
 
 # astrbot_plugin_mc_butler（MC 服务器大管家）
@@ -34,4 +34,4 @@
 
 ## 📖 完整说明
 
-配置项详解、整体架构、自然语言前置条件、回档二次确认流程、动作对照表、独立 WebUI 等，见 **[完整说明](完整说明.md)**。
+配置项详解、整体架构、自然语言前置条件、回档二次确认流程、动作对照表、独立 WebUI 等，见 **[完整说明](https://github.com/s-j-y-m/astrbot_plugin_mc_butler/blob/master/完整说明.md)**。
