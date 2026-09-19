@@ -6,7 +6,7 @@
 
 > QQ 群里的 MC 服务器大管家：QQ绑定MC账号、远程执行服务器指令、查看子服状态，@机器人 说人话就能用。
 
-## ⚠️⚠️⚠️想要正常使用，必须安装相配合的Velocity和MCDR的插件！！！
+## ⚠️ 想要正常使用，必须安装相配合的 [Velocity 和 MCDR 配套插件](https://github.com/s-j-y-m/astrbot_plugin_mc_butler_VC-MCDR)
 
 ## ✨ 功能
 
@@ -19,7 +19,7 @@
 ## 📦 安装
 
 1. AstrBot ≥ v4.10.4：插件市场搜索「MC 服务器大管家」，或从本仓库安装
-2. 配套组件在 [Releases](https://github.com/s-j-y-m/astrbot_plugin_mc_butler/releases) 下载：
+2. 配套组件已开源：[astrbot_plugin_mc_butler_VC-MCDR](https://github.com/s-j-y-m/astrbot_plugin_mc_butler_VC-MCDR)（按其 README 安装；[Releases](https://github.com/s-j-y-m/astrbot_plugin_mc_butler/releases) 中另有历史打包存档）：
    - Velocity 代理装 `mclink-velocity`（进服拦截 + HTTP/RCON 指令桥）
    - 每个子服的 MCDR 装 `rcon_bridge`（RCON 服务端）
 
